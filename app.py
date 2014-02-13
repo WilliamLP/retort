@@ -68,8 +68,10 @@ def dispatch(controller, action, path):
 
     # If there's a template, use it.
     template_name = '%s/%s.html' % (controller, action)
-    print template_name
-    if os.path.exists('templates/' + template_name):
+    try_path = os.path.dirname(os.path.realpath(__file__)) + '/templates/' + template_name
+    print "trying template: " + try_path
+    if os.path.exists(try_path):
+        print "template found"
         # Allow no return to work, for a template with no parameters.
         if result is None:
             result = dict()
