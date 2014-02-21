@@ -11,11 +11,24 @@
         </thead>
         <tbody id="city-turns"></tbody>
     </table>
+
 </div>
 
-<div id="tile-popup" class="modal hide" tabindex="-1">
+<div id="tile-popup" class="modal" tabindex="-1">
     <div class="modal-dialog modal-sm">
         <div class="modal-content">
+            <div class="modal-body">
+            {% for cur_resource in ("Food", "Prod", "Commerce") %}
+                <div class=""><small>{{ cur_resource }}</small></div>
+                <div class="btn-group" data-toggle="buttons">
+                    {% for i in range(0,9) %}
+                    <label class="btn btn-primary btn-sm" name="{{ cur_resource }}" value="{{ i }}">
+                        <input type="radio" name="{{ cur_resource }}" value="{{ i }}"> {{ i }}
+                    </label>
+                    {% endfor %}
+                </div>
+            {% endfor %}
+            </div>
         </div>
     </div>
 </div>
@@ -25,28 +38,17 @@
 </script>
 
 <script type="text/template" id="city-tile-template">
-    <button type="button" class="btn btn-default city-tile<% if (y==0) { %> tile-new-row<% } %><% if (!valid) { %> city-tile-hidden<% } %>"
+    <button type="button" class="btn btn-default btn-sm city-tile<% if (y==0) { %> tile-new-row<% } %><% if (!valid) { %> city-tile-hidden<% } %>"
             data-x="<%- x %>" data-y="<%- y %>">
         <%- f %>/<%- h %>/<%- c %>
     </button>
 </script>
 
 <script type="text/template" id="city-turn-template">
+    <td><%- turn %></td>
     <td><%- pop %></td>
     <td><%- food %></td>
     <td><%- hammers %></td>
-</script>
-
-<script type="text/template" id="tile-popup-template">
-    <div class="tile-popup-column">
-        Food
-    </div>
-    <div class="tile-popup-column">
-        Hammers
-    </div>
-    <div class="tile-popup-column">
-        Commerce
-    </div>
 </script>
 
 {% endblock %}
