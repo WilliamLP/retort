@@ -10,7 +10,7 @@ import shared
 app = flask.Flask(__name__)
 
 menu = [
-    {'tab': 'Hello', 'path': '/index/index'},
+    {'tab': 'Cities', 'path': '/cities/index'},
 ]
 
 def setup():
