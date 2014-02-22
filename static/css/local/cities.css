@@ -1,4 +1,5 @@
 .city-tile{float: left;}
 .city-tile-hidden{visibility: hidden;}
+.modal-tile-grid{display: table;}
 .tile-new-row{clear: left;}
 .tile-popup-column{float: left;}

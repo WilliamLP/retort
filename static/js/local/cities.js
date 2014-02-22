@@ -18,16 +18,12 @@ app.City = Backbone.Model.extend({
     initialize: function() {
         console.log("City initialize!");
         this.turns = new app.CityTurnList();
-        var prevTurn = null;
         for(var i=0; i<app.Constants.TURN_COUNT; i++) {
             var turn = new app.CityTurn();
-            if (prevTurn) {
-                turn.prevTurn = prevTurn;
-            }
+            turn.city = this;
+            turn.index = i;
             this.turns.add(turn);
-            prevTurn = turn;
         }
-
     },
     generateTurns: function() {
         console.log("Generate turns!");
@@ -40,10 +36,19 @@ app.City = Backbone.Model.extend({
 
         for(var i=1; i<app.Constants.TURN_COUNT; i++) {
             var turn = this.turns.at(i);
-            turn.calculateFromPrevious()
+            turn.calculateFromPrevious(this.turns.at(i-1));
         }
 
         this.trigger("reset");
+    },
+    resetTileSelections: function(startIndex) {
+        console.log("Resetting from turn %i", startIndex);
+        var selected = this.turns.at(startIndex).selectedTiles;
+        for(var i=startIndex+1; i<app.Constants.TURN_COUNT; i++) {
+            this.turns.at(i).selectedTiles = _.clone(selected);
+        }
+
+        this.trigger("change");
     }
 });
 
@@ -60,15 +65,63 @@ app.CityTurn = Backbone.Model.extend({
     },
     initialize: function() {
         this.tileGrid = new app.TileGrid();
+        this.selectedTiles = {"2,2": true};
     },
-    calculateFromPrevious: function() {
-        var prev = this.prevTurn;
+    calculateFromPrevious: function(prev) {
         this.set("turn", prev.get('turn') + 1);
         this.set("pop", prev.get('pop'));
         this.set("food", prev.get('food'));
         this.set("hammers", prev.get('hammers'));
 
         this.tileGrid.setTiles(prev.tileGrid);
+    },
+    numberSelected: function() {
+        return _.keys(this.selectedTiles).length;
+    },
+    isTileSelected: function(x, y) {
+        var key = x + "," + y;
+        return (key in this.selectedTiles);
+    },
+    selectedTileList: function() {
+        var result = [];
+
+        for(var x=0; x<5; x++) {
+            for(var y=0;  y<5; y++) {
+                var key = x + ',' + y;
+                if (key in this.selectedTiles) {
+                    result.push(this.tileGrid.getTile(x,y));
+                }
+            }
+        }
+        return result;
+    },
+    selectTile: function(x, y) {
+        var key = x + "," + y;
+        if (key in this.selectedTiles) {
+            return false;
+        }
+        if (this.numberSelected() >= this.get('pop') + 1) {
+            return false;
+        }
+
+        this.selectedTiles[key] = true;
+
+        this.city.resetTileSelections(this.index);
+        this.trigger('change');
+
+        return true;
+    },
+    unselectTile: function(x, y) {
+        var key = x + "," + y;
+        if (key == '2,2' || !(key in this.selectedTiles)) {
+            return false;
+        }
+        delete this.selectedTiles[key];
+
+        this.city.resetTileSelections(this.index);
+        this.trigger('change');
+
+        return true;
     }
 });
 
@@ -127,9 +180,25 @@ app.CityTurnView = Backbone.View.extend({
     template: _.template($('#city-turn-template').html()),
     events: {
     },
+    tilesWorkedString: function() {
+        var tileStrings = [];
+        var selected = this.model.selectedTileList();
+        $.each(selected, function(k, v) {
+            if (v.x == 2 && v.y == 2) {
+                return;
+            }
+            var tileString = v.f + '/' + v.h + '/' + v.c;
+            tileStrings.push(tileString);
+        });
+        return tileStrings.join();
+    },
     render: function() {
-        console.log("Turn render! %o", this.model.toJSON());
-        this.$el.html(this.template(this.model.toJSON()));
+        var viewParams = this.model.toJSON();
+
+        viewParams['tilesWorked'] = this.tilesWorkedString();
+
+
+        this.$el.html(this.template(viewParams));
         this.$el.attr('data-cid', this.model.cid);
         return this;
     },
@@ -149,7 +218,7 @@ app.TileGridView = Backbone.View.extend({
         for(var x=0; x<5; x++) {
             var col = []
             for(var y=0;  y<5; y++) {
-                var renderedTile = this.tileTemplate(this.model.getTile(x,y));
+                var renderedTile = this.tileTemplate(this.model.tileGrid.getTile(x,y));
                 tileOutputs.push(renderedTile);
             }
         }
@@ -164,9 +233,9 @@ app.TileGridView = Backbone.View.extend({
         }
     },
     setModel: function (model) {
-        this.stopListening(this.model);
+        this.stopListening();
         this.model = model;
-        this.listenTo(this.model, "change", this.render);
+        this.listenTo(this.model.tileGrid, "change", this.render);
         this.render();
     },
     editTile: function(e) {
@@ -175,7 +244,7 @@ app.TileGridView = Backbone.View.extend({
         var x = parseInt($el.attr('data-x'));
         var y = parseInt($el.attr('data-y'));
 
-        this.tilePopupView.popup(this.model, x, y);
+        this.tilePopupView.popup(this.model.tileGrid, x, y);
     }
 });
 
@@ -207,7 +276,66 @@ app.TilePopupView = Backbone.View.extend({
         var c = parseInt(this.$('.btn.active[name="Commerce"]').attr('value'));
 
         this.model.setTile(this.tile.x, this.tile.y, {"f": f, "h": h, "c": c});
-        this.model.trigger("change");
+    }
+});
+
+app.TileSelectPopupView = Backbone.View.extend({
+    tileTemplate: _.template($('#city-tile-template').html()),
+    el: $("#tile-select-popup"),
+    events: {
+        "hide.bs.modal": "closeView",
+        "click button": "toggleTile"
+    },
+    popup: function(model) {
+        this.model = model;
+
+        this.stopListening();
+        this.changed = false;
+        var self = this;
+        this.listenTo(model, "change", function() { self.changed = true; console.log('change'); });
+
+        this.render();
+
+        this.$el.modal('show');
+        return this;
+    },
+    render: function() {
+        this.$('#modal-tile-grid').empty();
+        for(var x=0; x<5; x++) {
+            var col = []
+            for(var y=0;  y<5; y++) {
+                var renderedTile = this.tileTemplate(this.model.tileGrid.getTile(x,y));
+                this.$('#modal-tile-grid').append(renderedTile);
+
+                if (this.model.isTileSelected(x,y)) {
+                    this.$('button[data-x=' + x + '][data-y=' + y + ']').removeClass('btn-default').addClass('btn-success');
+                }
+            }
+        }
+
+    },
+    initialize: function() {
+    },
+    closeView: function() {
+        console.log('Close view!');
+        if (this.changed) {
+            this.model.city.trigger("reset");
+        }
+    },
+    toggleTile: function(e) {
+        var btn = this.$(e.target);
+        var x = parseInt(btn.attr('data-x'));
+        var y = parseInt(btn.attr('data-y'));
+
+        if (btn.hasClass('btn-default')) {
+            if (this.model.selectTile(x,y)) {
+                btn.removeClass('btn-default').addClass('btn-success');
+            }
+        } else {
+            if (this.model.unselectTile(x,y)) {
+                btn.removeClass('btn-success').addClass('btn-default');
+            }
+        }
     }
 });
 
@@ -217,19 +345,22 @@ app.CityView = Backbone.View.extend({
     headerTemplate: _.template($('#city-header-template').html()),
 
     events: {
-        "click.tr": "selectRow"
+        "click tr": "selectRow",
+        "click .tile-select": "selectTiles"
     },
     initialize: function() {
-        this.listenTo(this.model, 'reset', this.addAll);
-
         this.tileGridView = new app.TileGridView({});
+        this.tileSelectPopupView = new app.TileSelectPopupView({});
+
+        this.listenTo(this.model, 'reset', this.addAll);
+        this.listenTo(this.tileSelectPopupView, 'change', this.addAll);
 
         console.log("Initialize!");
 
         this.render();
 
         this.model.generateTurns();
-        this.selectTurn(this.model.turns.first().cid);
+        this.setSelectedTurn(this.model.turns.first().cid);
     },
     render: function() {
         console.log('render!');
@@ -237,26 +368,38 @@ app.CityView = Backbone.View.extend({
         this.$('#city-header').html(this.headerTemplate({}));
     },
     addOne: function(item) {
-        console.log('add one! %o', item);
         var turnView = new app.CityTurnView({model: item});
         var rendered = turnView.render().el;
         this.$("#city-turns").append(rendered);
     },
     addAll: function() {
-        console.log('add all! %o', this.model.turns);
+        this.$("#city-turns").empty();
         this.model.turns.each(this.addOne, this);
     },
-    selectTurn: function(turnCid) {
+    refreshAll: function() {
+        console.log('refresh all!');
+        this.addAll();
+    },
+    setSelectedTurn: function(turnCid) {
         this.selectedTurn = turnCid;
 
-        this.tileGridView.setModel(this.model.turns.get(this.selectedTurn).tileGrid);
+        this.tileGridView.setModel(this.model.turns.get(this.selectedTurn));
 
         this.$('tr.info').removeClass('info');
         this.$('tr[data-cid=' + turnCid + ']').addClass('info');
     },
     selectRow: function(e) {
         console.log("Select row!");
-        this.selectTurn($(e.target).parent('tr').attr('data-cid'));
+        this.setSelectedTurn($(e.target).parent('tr').attr('data-cid'));
+    },
+    selectTiles: function(e) {
+        console.log("Select tiles!");
+
+        var turnCid = $(e.target).parent('tr').attr('data-cid');
+
+        this.tileSelectPopupView.popup(this.model.turns.get(turnCid));
+
+        return false;
     }
 })
 
